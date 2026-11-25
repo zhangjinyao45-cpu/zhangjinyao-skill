@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>__TITLE__</title>
+  <style>
+    :root { --bg:#f4f5f7; --panel:#fff; --text:#1f2933; --muted:#667085; --line:#d0d5dd; --blue:#2563eb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font-family: Arial, "Microsoft YaHei", sans-serif; }
+    .app { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 100vh; }
+    .stage { display: flex; align-items: center; justify-content: center; padding: 18px; overflow: hidden; }
+    .canvas-shell { width: 100%; height: calc(100vh - 36px); display: flex; align-items: center; justify-content: center; background: #16191f; border: 1px solid #101318; border-radius: 8px; overflow: hidden; }
+    canvas { display: block; max-width: 100%; max-height: 100%; cursor: grab; background: #111; }
+    canvas.dragging { cursor: grabbing; }
+    aside { border-left: 1px solid var(--line); background: var(--panel); padding: 18px; overflow-y: auto; }
+    h1 { margin: 0 0 14px; font-size: 18px; line-height: 1.25; }
+    .section { padding: 14px 0; border-top: 1px solid var(--line); }
+    .section:first-of-type { border-top: 0; padding-top: 0; }
+    label { display: block; margin: 10px 0 6px; font-size: 13px; font-weight: 700; color: #344054; }
+    select, input, button { width: 100%; min-height: 36px; border-radius: 6px; border: 1px solid var(--line); font: inherit; font-size: 14px; }
+    select, input { padding: 6px 8px; background: #fff; color: var(--text); }
+    input[type="color"] { padding: 2px; }
+    input[type="range"] { padding: 0; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    button { border: 0; background: var(--blue); color: #fff; font-weight: 700; cursor: pointer; }
+    button.secondary { background: #eef2f7; color: #1f2933; border: 1px solid var(--line); }
+    .hint { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .value { color: var(--muted); font-size: 12px; font-weight: 400; float: right; }
+    @media (max-width: 980px) { .app { grid-template-columns: 1fr; } aside { border-left: 0; border-top: 1px solid var(--line); } .canvas-shell { height: 68vh; } }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="stage"><div class="canvas-shell"><canvas id="canvas"></canvas></div></section>
+    <aside>
+      <h1>图片标注编辑器</h1>
+      <div class="section">
+        <label for="itemSelect">选中元素</label>
+        <select id="itemSelect"></select>
+        <p class="hint">在画面中直接拖动元素；弧线、文字、线段都可以移动。</p>
+      </div>
+      <div class="section">
+        <div class="row">
+          <div><label for="xInput">X</label><input id="xInput" type="number" step="1" /></div>
+          <div><label for="yInput">Y</label><input id="yInput" type="number" step="1" /></div>
+        </div>
+        <div class="row" id="textControls">
+          <div><label for="fontInput">字号</label><input id="fontInput" type="number" min="12" max="160" step="1" /></div>
+          <div><label for="textInput">文字</label><input id="textInput" type="text" /></div>
+        </div>
+        <div id="arcControls">
+          <label for="radiusInput">弧线半径 <span class="value" id="radiusValue"></span></label>
+          <input id="radiusInput" type="range" min="20" max="520" step="1" />
+          <div class="row">
+            <div><label for="startInput">起始角</label><input id="startInput" type="number" step="1" /></div>
+            <div><label for="sweepInput">弧长角</label><input id="sweepInput" type="number" step="1" /></div>
+          </div>
+        </div>
+        <div id="lineControls">
+          <div class="row">
+            <div><label for="x2Input">终点 X</label><input id="x2Input" type="number" step="1" /></div>
+            <div><label for="y2Input">终点 Y</label><input id="y2Input" type="number" step="1" /></div>
+          </div>
+        </div>
+        <div class="row">
+          <div><label for="colorInput">颜色</label><input id="colorInput" type="color" /></div>
+          <div><label for="widthInput">线宽/描边</label><input id="widthInput" type="number" min="1" max="40" step="1" /></div>
+        </div>
+      </div>
+      <div class="section">
+        <button id="exportBtn">导出 PNG</button>
+        <button class="secondary" id="resetBtn" style="margin-top:10px;">恢复初始位置</button>
+        <p class="hint">导出文件使用原图分辨率，适合继续放进论文。</p>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const img = new Image();
+    img.src = "__IMAGE_SRC__";
+    const initialItems = __ITEMS_JSON__;
+    let items = structuredClone(initialItems);
+    let selectedId = items[0]?.id || "";
+    let scale = 1, dragging = false, dragStart = null;
+    const controls = {
+      itemSelect: document.getElementById("itemSelect"),
+      xInput: document.getElementById("xInput"), yInput: document.getElementById("yInput"),
+      textControls: document.getElementById("textControls"), textInput: document.getElementById("textInput"), fontInput: document.getElementById("fontInput"),
+      arcControls: document.getElementById("arcControls"), radiusInput: document.getElementById("radiusInput"), radiusValue: document.getElementById("radiusValue"), startInput: document.getElementById("startInput"), sweepInput: document.getElementById("sweepInput"),
+      lineControls: document.getElementById("lineControls"), x2Input: document.getElementById("x2Input"), y2Input: document.getElementById("y2Input"),
+      colorInput: document.getElementById("colorInput"), widthInput: document.getElementById("widthInput"),
+      exportBtn: document.getElementById("exportBtn"), resetBtn: document.getElementById("resetBtn")
+    };
+    function selectedItem(){ return items.find(item => item.id === selectedId); }
+    function resizeCanvas(){
+      const shell = document.querySelector(".canvas-shell");
+      scale = Math.min(shell.clientWidth / img.naturalWidth, shell.clientHeight / img.naturalHeight);
+      canvas.width = Math.round(img.naturalWidth * scale); canvas.height = Math.round(img.naturalHeight * scale); draw();
+    }
+    function canvasToImage(x,y){ return { x: x / scale, y: y / scale }; }
+    function setupSelect(){
+      controls.itemSelect.innerHTML = "";
+      for (const item of items) { const option = document.createElement("option"); option.value = item.id; option.textContent = item.name || item.id; controls.itemSelect.appendChild(option); }
+      controls.itemSelect.value = selectedId;
+    }
+    function drawText(targetCtx,item,drawScale=1,selected=false){
+      targetCtx.save(); targetCtx.font = `bold ${item.fontSize * drawScale}px Arial, Microsoft YaHei, sans-serif`;
+      targetCtx.lineJoin = "round"; targetCtx.strokeStyle = "rgba(0,0,0,0.82)"; targetCtx.lineWidth = item.width * drawScale; targetCtx.fillStyle = item.color;
+      targetCtx.strokeText(item.text, item.x * drawScale, item.y * drawScale); targetCtx.fillText(item.text, item.x * drawScale, item.y * drawScale);
+      if (selected) { const m = targetCtx.measureText(item.text); targetCtx.strokeStyle = "#2563eb"; targetCtx.lineWidth = Math.max(2,3*drawScale); targetCtx.setLineDash([8*drawScale,6*drawScale]); targetCtx.strokeRect(item.x*drawScale-8*drawScale, item.y*drawScale-item.fontSize*drawScale, m.width+16*drawScale, item.fontSize*1.25*drawScale); }
+      targetCtx.restore();
+    }
+    function drawArc(targetCtx,item,drawScale=1,selected=false){
+      targetCtx.save(); targetCtx.beginPath(); targetCtx.arc(item.x*drawScale,item.y*drawScale,item.radius*drawScale,item.start*Math.PI/180,(item.start+item.sweep)*Math.PI/180,false);
+      targetCtx.strokeStyle = item.color; targetCtx.lineWidth = item.width * drawScale; targetCtx.lineCap = "round"; targetCtx.stroke();
+      if (selected) { targetCtx.beginPath(); targetCtx.arc(item.x*drawScale,item.y*drawScale,12*drawScale,0,Math.PI*2); targetCtx.fillStyle = "#2563eb"; targetCtx.fill(); }
+      targetCtx.restore();
+    }
+    function drawLine(targetCtx,item,drawScale=1,selected=false){
+      targetCtx.save(); targetCtx.beginPath(); targetCtx.moveTo(item.x*drawScale,item.y*drawScale); targetCtx.lineTo(item.x2*drawScale,item.y2*drawScale);
+      targetCtx.strokeStyle = item.color; targetCtx.lineWidth = item.width * drawScale; targetCtx.lineCap = "round"; targetCtx.stroke();
+      if (selected) { targetCtx.fillStyle = "#2563eb"; targetCtx.beginPath(); targetCtx.arc(item.x*drawScale,item.y*drawScale,9*drawScale,0,Math.PI*2); targetCtx.arc(item.x2*drawScale,item.y2*drawScale,9*drawScale,0,Math.PI*2); targetCtx.fill(); }
+      targetCtx.restore();
+    }
+    function draw(){
+      ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      for (const item of items) { if (item.type === "arc") drawArc(ctx,item,scale,item.id===selectedId); if (item.type === "text") drawText(ctx,item,scale,item.id===selectedId); if (item.type === "line") drawLine(ctx,item,scale,item.id===selectedId); }
+    }
+    function syncControls(){
+      const item = selectedItem(); if (!item) return;
+      controls.itemSelect.value = selectedId; controls.xInput.value = Math.round(item.x); controls.yInput.value = Math.round(item.y); controls.colorInput.value = item.color; controls.widthInput.value = item.width;
+      controls.textControls.style.display = item.type === "text" ? "grid" : "none"; controls.arcControls.style.display = item.type === "arc" ? "block" : "none"; controls.lineControls.style.display = item.type === "line" ? "block" : "none";
+      if (item.type === "text") { controls.textInput.value = item.text; controls.fontInput.value = item.fontSize; }
+      if (item.type === "arc") { controls.radiusInput.value = item.radius; controls.radiusValue.textContent = `${Math.round(item.radius)} px`; controls.startInput.value = item.start; controls.sweepInput.value = item.sweep; }
+      if (item.type === "line") { controls.x2Input.value = Math.round(item.x2); controls.y2Input.value = Math.round(item.y2); }
+    }
+    function hitTest(x,y){
+      const p = canvasToImage(x,y);
+      for (let i = items.length - 1; i >= 0; i--) {
+        const item = items[i];
+        if (item.type === "text") { ctx.save(); ctx.font = `bold ${item.fontSize*scale}px Arial`; const w = ctx.measureText(item.text).width / scale; ctx.restore(); if (p.x >= item.x-12 && p.x <= item.x+w+12 && p.y >= item.y-item.fontSize-12 && p.y <= item.y+18) return item.id; }
+        if (item.type === "arc") { const d = Math.hypot(p.x-item.x,p.y-item.y); if (Math.abs(d-item.radius) < 28 || Math.hypot(p.x-item.x,p.y-item.y) < 34) return item.id; }
+        if (item.type === "line") { const a={x:item.x,y:item.y}, b={x:item.x2,y:item.y2}; const l2=(b.x-a.x)**2+(b.y-a.y)**2; const t=Math.max(0,Math.min(1,((p.x-a.x)*(b.x-a.x)+(p.y-a.y)*(b.y-a.y))/l2)); const q={x:a.x+t*(b.x-a.x),y:a.y+t*(b.y-a.y)}; if (Math.hypot(p.x-q.x,p.y-q.y) < 24) return item.id; }
+      }
+      return null;
+    }
+    function applyInputs(){
+      const item = selectedItem(); if (!item) return;
+      Object.assign(item, { x:Number(controls.xInput.value), y:Number(controls.yInput.value), color:controls.colorInput.value, width:Number(controls.widthInput.value) });
+      if (item.type === "text") Object.assign(item, { text:controls.textInput.value, fontSize:Number(controls.fontInput.value) });
+      if (item.type === "arc") Object.assign(item, { radius:Number(controls.radiusInput.value), start:Number(controls.startInput.value), sweep:Number(controls.sweepInput.value) });
+      if (item.type === "line") Object.assign(item, { x2:Number(controls.x2Input.value), y2:Number(controls.y2Input.value) });
+      syncControls(); draw();
+    }
+    controls.itemSelect.addEventListener("change",()=>{ selectedId=controls.itemSelect.value; syncControls(); draw(); });
+    for (const input of [controls.xInput,controls.yInput,controls.colorInput,controls.widthInput,controls.textInput,controls.fontInput,controls.radiusInput,controls.startInput,controls.sweepInput,controls.x2Input,controls.y2Input]) input.addEventListener("input", applyInputs);
+    canvas.addEventListener("pointerdown",(event)=>{ const r=canvas.getBoundingClientRect(); const hit=hitTest(event.clientX-r.left,event.clientY-r.top); if(hit) selectedId=hit; const item=selectedItem(); const p=canvasToImage(event.clientX-r.left,event.clientY-r.top); dragging=true; dragStart={px:p.x,py:p.y,ix:item.x,iy:item.y,ix2:item.x2,iy2:item.y2}; canvas.classList.add("dragging"); canvas.setPointerCapture(event.pointerId); syncControls(); draw(); });
+    canvas.addEventListener("pointermove",(event)=>{ if(!dragging||!dragStart) return; const r=canvas.getBoundingClientRect(); const p=canvasToImage(event.clientX-r.left,event.clientY-r.top); const item=selectedItem(); const dx=p.x-dragStart.px, dy=p.y-dragStart.py; item.x=dragStart.ix+dx; item.y=dragStart.iy+dy; if(item.type==="line"){ item.x2=dragStart.ix2+dx; item.y2=dragStart.iy2+dy; } syncControls(); draw(); });
+    canvas.addEventListener("pointerup",(event)=>{ dragging=false; dragStart=null; canvas.classList.remove("dragging"); canvas.releasePointerCapture(event.pointerId); });
+    controls.resetBtn.addEventListener("click",()=>{ items=structuredClone(initialItems); selectedId=items[0]?.id||""; setupSelect(); syncControls(); draw(); });
+    controls.exportBtn.addEventListener("click",()=>{ const out=document.createElement("canvas"); out.width=img.naturalWidth; out.height=img.naturalHeight; const outCtx=out.getContext("2d"); outCtx.drawImage(img,0,0); for(const item of items){ if(item.type==="arc") drawArc(outCtx,item,1,false); if(item.type==="text") drawText(outCtx,item,1,false); if(item.type==="line") drawLine(outCtx,item,1,false); } const link=document.createElement("a"); link.download="editable-image-export.png"; link.href=out.toDataURL("image/png"); link.click(); });
+    img.addEventListener("load",()=>{ setupSelect(); syncControls(); resizeCanvas(); });
+    window.addEventListener("resize", resizeCanvas);
+  </script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+interface:
+  display_name: "可编辑图"
+  short_description: "生成本地可拖拽图片标注编辑器并导出高清图"
+  default_prompt: "Use $ke-bian-ji-tu to create a draggable annotation editor for this experiment image."
+  brand_color: "#2563EB"
+policy:
+  allow_implicit_invocation: true
